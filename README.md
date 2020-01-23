@@ -1,0 +1,2 @@
+# anota
+Os amantes do terminal definitivamente não gostam de sair da tela preta, por isso geralmente para criar notas executamos nano ou vi. Mas isso nos dá o trabalho de ter que organizá-las em diretórios. Algumas vezes esquecemos onde salvamos, não que seja complicado para achá-la novamente. O ANOTA! um pequeno gerenciador de notas em mode de texto, com uma interface bem simples você tem todas as notas centralizadas a um comando de distância!
