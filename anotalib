@@ -1,0 +1,425 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------
+#
+# Script		: anotalib
+# Descrição		: biblioteca de funçoes para ferramenta de anotações ANOTA!
+# Versão		: 0.9-beta
+# Autor			: Eppur Si Muove
+# Contato		: eppur.si.muove@keemail.me
+# Criação		: 29/12/2019
+# Modificação	: 23/01/2020
+# Licença		: GNU/GPL v3.0
+#
+# ------------------------------------------------------
+#
+# Uso:
+#
+#
+# ------------------------------------------------------
+
+# ----------| Inicializa as variáveis com valores padrões |---------- #
+CFG_DIR="$HOME/.config/anota"
+CFG_ARQ="$CFG_DIR/config"
+DB_ARQ="$HOME/.config/anota/notas.db"
+EDT_FAV=$(sed -n -e 's/^.*Editor: //p' "$CFG_ARQ" 2> /dev/null)
+NT_DIR="$HOME/.local/anota"
+declare -a ARRCADERNOS
+declare -a ARRNOTAS
+
+# se não existir, cria o diretório para salvar o aquivo que configura o editor e o de notas
+mkdir -p $CFG_DIR $NT_DIR
+
+#-------| configura anota ou carrega informações do arquivo |-------- #
+defineEditor(){
+	
+	# se arquivo de configuração não existir ou usuário passar --editor:
+	# o programa vai redefinir o editor favorito do usuário
+	if [[ -z $EDT_FAV || $1 = "--editor" ]]; then
+
+		# usuário escolhe editor favorito para configurar arquivo
+		read -p "# Seu editor favorito: " EDT_FAV
+		
+		# pede editor válido, enquanto ele for inválido
+		while ! (which $EDT_FAV); do
+			echo "Editor inválido, escolha outro:"
+			read -p $'\n>> ' EDT_FAV
+		done
+		
+		# anota o editor em $CFG_ARQ
+		echo "# ------| FAVOR NAO EDITAR ESSE ARQUIVO MANUALMENTE |-----#" > $CFG_ARQ
+		echo "Editor: $EDT_FAV" >> $CFG_ARQ
+		return $?
+	fi
+	return 0
+}
+
+estaVazio(){
+	
+	# se diretório não existe então estaVazio
+	[[ ! -d $1 ]] && return 0
+		
+	# variáveis para o próximo teste
+	local a=0
+	local arq1
+	local arq2
+	local -a arrArqs
+	
+	# armazena o nome de cada arquivo/diretório que estivem em $NT_DIR
+	arrArqs=( "$1"/* )
+	
+	# itera cada nome de arquivo/diretório e armazena cada um na variavel arq1
+	# se var arq1 for diretório, entra e conta quantos arquivos de nota (.nta) tem lá dentro
+	# no final variável a conterá o número total de notas dentro dos diretórios dentro de arq1
+	for arq1 in "${arrArqs[@]}"; do
+		if [[ -d "$arq1" ]]; then
+			for arq2 in "$arq1"/*; do
+				[[ -f "$arq2" ]] && [[ "$arq2" == *.nta ]] && let a++
+			done
+		fi
+		[[ -f "$arq1" ]] && [[ "$arq1" == *.nta ]] && let a++
+	done
+	
+	# se variável a for diferente de zero então não estaVazio
+	[[ $a -ne 0 ]] && return $a
+	
+	# se passar pelo teste acima então estaVazio
+	return 0
+}
+
+primeiraNota(){
+	# -----| Dados para 1ª nota |----- #
+	local ntDia=$(date +'%d')
+	local ntMes=$(date +'%m')
+	local ntAno=$(date +'%Y')
+	local ntHora=$(date +'%H')
+	local ntMin=$(date +'%M')
+	local ntSecs=$(date +'%S')
+	local ntCriacao="$ntDia-$ntMes-$ntAno"
+	local ntTitulo="O ANOTA! te dá Boas-Vindas!"
+	local ntNome="$ntAno$ntMes$ntDia-$ntHora$ntMin$ntSecs"
+	local ntArq="$ntNome.nta"
+
+	# registra a primeira nota na base de dados
+	echo "$ntNome $ntDia $ntMes $ntAno Bem-Vindo $ntTitulo" >> $DB_ARQ
+	
+	# cria a pasta do caderno
+	mkdir -p "$NT_DIR/Bem-Vindo/"
+	
+	# escreve a primeira nota no caderno Bem-Vindo
+	echo -e "# -------------------------------------------------
+# -------------------------------------------------
+#
+# Criação: $ntCriacao			Caderno: Bem-Vindo
+#
+# Modificação: $ntCriacao
+#
+# Título: $ntTitulo
+#
+# -------------------------------------------------
+# -------------------------------------------------
+
+Olá $USER,
+
+Seja bem-vindo ao ANOTA!
+Esperamos que tenha uma um ótima experiência esse simples script.
+Qualque dúvida entrar em contato no email: eppur.si.muove@keemail.me
+
+Abraços,
+
+Eppur Si Muove
+
+# -------| 'O conhecimento acima da autoridade' |------- #" > "$NT_DIR/Bem-Vindo/$ntArq"
+	return $?
+}
+
+# verifica se string passada como parâmetro contém caractére inválido
+checaCaracteres(){
+	if [[ $@ =~ [^[:alnum:]"._-"] || $@ == *" "* || $@ == "" ]]; then
+		echo "Nome de inválido. Tente sem caracteres especiais."
+		return 1
+	else
+		return 0
+	fi
+}
+
+# passar no $1 a variável com o último indice de ARRCADERNOS
+selecionarNumCaderno(){
+	local numCaderno=""
+	read -p $'\n# -->> ' numCaderno
+	if (test $numCaderno -ge 0) 2> /dev/null && (test $numCaderno -le $1) 2> /dev/null; then
+		return $numCaderno
+	else
+		echo -n "Valor inválido, escolha outro:"
+		selecionarNumCaderno $1
+	fi
+}
+
+# lista os cadernos disponíveis para o usuário
+escolheCaderno(){
+	# ------| reseta variável global |----- #
+	ARRCADERNOS=()
+	# ------| variáveis locais |------#
+	local -a arrLinhas
+	local dir
+	# --------------------------------#
+	clear
+	echo -e "\n# -----------| :ANOTA! - Início: Escolher um caderno |----------- #\n"
+
+	# itera a saída do comando ls na pasta das notas e armazena cada diretório numa array
+	local i=0
+	echo "# $i. Sair..."
+	let i++
+	echo "# $i. Novo caderno..."
+	let i++
+	echo "# $i. Remover um caderno..."
+	
+	# se diretório de cadernos estiver vazio pula logo para a funçao selecionarNumCaderno
+	taVazio=$(echo $NT_DIR/*)
+	taVazio=${taVazio##*/}
+	if [[ "$taVazio" != "*" ]]; then
+		# se diretorio de cadernos não estiver vazio
+		# armazena na variável GLOBAL ARRCADERNOS os nomes dos cadernos
+		# começando pelo index número 3 (dois) e lista na tela para usuário.
+		for dir in "$NT_DIR"/*; do
+			let i++
+			dir=${dir##*/}
+			ARRCADERNOS[i]=$dir
+			echo "# $i. ${ARRCADERNOS[$i]}"
+		done
+	fi
+	
+	# pede ao usuário o número de um caderno para abrir
+	# aceita somente números de zero até o índice máximo da array ($i)
+	# (zero para sair, um para Novo caderno...)
+	selecionarNumCaderno $i
+	return $?
+}
+
+# cria um novo caderno
+novoCaderno(){
+	# usuário define nome válido para o caderno
+	local ntCadernoTmp=""
+	while : ; do
+		read -p $'\n# Nome do novo caderno: ' ntCadernoTmp
+		(checaCaracteres $ntCadernoTmp) && break
+	done
+	if (! mkdir -p "$NT_DIR/$ntCadernoTmp" &> /dev/null); then
+		echo "Algo deu errado ao criar $NT_DIR/$ntCadernoTmp. Execute anota --reconfigure"
+		return 1
+	fi
+	return 0
+}
+
+# passar no $1 a variável com o último indice de ARRNOTAS
+selecionarNumNota(){
+	local numNota=""
+	read -p $'\n# -->> ' numNota
+	if (test $numNota -ge 0) 2> /dev/null && (test $numNota -le $1) 2> /dev/null; then
+		return $numNota
+	else
+		echo -n "Valor inválido, escolha outro:"
+		selecionarNumNota $1
+	fi
+}
+
+listaNotasPorCaderno(){
+	# -----| reseta variável global ARRNOTAS |------ #
+	ARRNOTAS=()
+	# ---------------------------------------------- #
+	clear
+	local i=0
+	
+	# armazena o nome do caderno escolhido
+	# $1 = número do carderno
+	local ntCaderno=${ARRCADERNOS[$1]}
+	
+	# readarray = armazena cada linha impressa pelo awk num índice da array arrLinhas (parâmetro -t = remove o \n do final de linha)
+	# awk = imprime apenas as linhas da base de dados contendo o nome do caderno na quinta coluna
+	readarray -t arrLinhas < <(awk -v coluna=$ntCaderno '$5 == coluna' $DB_ARQ)
+	
+	echo -e "\n# -----------| :$ntCaderno: Escolha uma nota |----------- #\n"
+	echo "# $i. Voltar..."
+	let i++
+	echo "# $i. Nova nota..."
+	let i++
+	echo "# $i. Remover uma nota..."
+	
+	# mostra apenas o título (coluna 6) de cada nota dentro do caderno selecionado (comando cut)
+	while (( "${#arrLinhas[@]}" >= $(($i-1)) )); do
+		let i++
+		echo -n "# $i. "
+		echo -n "${arrLinhas[$(($i-3))]}" | cut -d' ' -f6-
+		
+		# armazena nome de cada nota (coluna 1) em ARRNOTAS a partir do index númeero 3 da array
+		ARRNOTAS[$i]=$(echo -n "${arrLinhas[$(($i-3))]}" | cut -d' ' -f1)
+	done
+	
+	# pede ao usuário o número de uma nota para selecionar
+	# aceita somente números de zero até o índice máximo da array ($i)
+	# (zero para Voltar, um para Nova nota...)
+	selecionarNumNota $i
+	return $?
+}
+
+abreNota(){
+	
+	# armazena data atualizada
+	local dtNova=$(date +'%d-%m-%Y %H:%M:%S')
+	
+	# obtém data de Modificação no arquivo $1
+	local dt=$(sed -n -e 's/^.*# Modificação: //p' $1)
+	
+	# Troca data de modificação antiga pela nova
+	sed -i "s/Modificação: $dt*/Modificação: $dtNova/g" $1
+	
+	# armazena o número da última linha do arquivo de nota $1
+	local ultLinha=$(wc -l $1 | cut -d' ' -f1)
+	
+	# abre o arquivo de nota ($1) com o editor especificado
+	case "$EDT_FAV" in
+		"nano" | "geany" | "vi" | "vim") $EDT_FAV +$ultLinha $1;;
+		*) $EDT_FAV $1;;
+	esac
+}
+
+novaNota(){
+	# variáveis --------------------------------------------
+	local ntDia=$(date +'%d')
+	local ntMes=$(date +'%m')
+	local ntAno=$(date +'%Y')
+	local ntHora=$(date +'%H')
+	local ntMin=$(date +'%M')
+	local ntSecs=$(date +'%S')
+	local ntCriacao="$ntDia-$ntMes-$ntAno"
+	local ntTitulo="ANOTA!"
+	local ntNome="$ntAno$ntMes$ntDia-$ntHora$ntMin$ntSecs"
+	local ntArq="$ntNome.nta"
+
+	# define titulo da nota --------------------------------
+	read -p $'\n# Título para sua nova nota: ' ntTituloTmp
+	[[ -n "$ntTituloTmp" ]] && ntTitulo="$ntTituloTmp"
+	unset ntTituloTmp
+
+	# anotalib.sh --> escolheCaderno ----------------------
+	# >> lista cadernos criados pelo usuário
+	# >> chama função novoCaderno, caso usuário precise
+	# >> retorna número do caderno escolhido
+	local ntCaderno=${ARRCADERNOS[$1]}
+
+	# registra a nota na base de dados
+	echo "$ntNome $ntDia $ntMes $ntAno $ntCaderno $ntTitulo" >> "$DB_ARQ"
+
+	# define nome completo do arquivo
+	ntArq="$NT_DIR/$ntCaderno/$ntArq"
+
+	echo "# -------------------------------------------------
+# -------------------------------------------------
+#
+# Criação: $ntCriacao			Caderno: $ntCaderno
+#
+# Modificação: $ntCriacao
+#
+# Título: $ntTitulo
+#
+# -------------------------------------------------
+# -------------------------------------------------
+"> $ntArq
+
+	# anotalib.sh --> abreNota -----------------------------
+	# >> abre nota no editor preferido com ponteiro posicionado na última linha
+	abreNota $ntArq
+}
+
+removeCaderno(){
+	# armazena em numElementos, o nº de elementos da array ARRCADERNOS. 
+	local numElementos=$((${#ARRCADERNOS[@]}+2))
+	echo
+	echo -n "# Escolher um caderno para remover: "
+	selecionarNumCaderno $numElementos
+	local numCaderno=$?
+	while (($numCaderno <= 2)); do
+		echo -n "# 0, 1 e 2 não são opções válidas. Escolha um caderno: "
+		selecionarNumCaderno $numElementos
+		numCaderno=$?
+	done
+	
+	local caderno="${ARRCADERNOS[$numCaderno]}"
+	local cadernoDir="$NT_DIR/$caderno"
+	
+	# verifica se tem arquivos dentro do caderno selecionado
+	estaVazio $cadernoDir
+	local numArquivos=$?
+	
+	# se não houverem arquivos lá dentro, deleta do diretório do caderno
+	if [[ $numArquivos -eq 0 ]]; then
+		rmdir $cadernoDir
+		echo "# Caderno $caderno apagado!" && sleep 2
+	else
+		# se houver arquivos, pede confirmação do usuário
+		local confirma
+		read -p "# $caderno contém $numArquivos notas. Mesmo assim quer apagá-lo? (N/s): " confirma
+		
+		case $confirma in
+			"S"|"s")
+				rm -rf $cadernoDir
+				local -a arrLinhas
+				local linha
+				# readarray = armazena cada linha impressa pelo awk num índice da array arrLinhas (parâmetro -t = remove o \n do final de linha)
+				# awk = imprime apenas as linhas da base de dados contendo o nome do caderno na quinta coluna
+				readarray -t arrLinhas < <(awk -v coluna=$caderno '$5 == coluna' $DB_ARQ)
+				
+				for linha in "${arrLinhas[@]}"; do
+					# deleta apenas as linhas que batem exatamento com a linha dentro de $linha
+					sed -i "/$linha/d" $DB_ARQ
+				done
+				echo "# Caderno $caderno apagado!" && sleep 2
+				;;
+			*)
+				echo "# Ação cancelada!" && sleep 2
+				;;
+		esac
+	fi
+}
+
+removeNota(){
+	# armazena em numElementos o nº de elementos na array ARRNOTAS
+	local numElementos=$((${#ARRNOTAS[@]}+2))
+	
+	# armazena nome do caderno na variável caderno
+	local caderno=${ARRCADERNOS[$1]}
+	
+	echo
+	echo -n "# Escolher uma nota para remover: "
+	selecionarNumNota $numElementos
+	local numNota=$?
+	while (($numNota <= 2)); do
+		echo -n "# 0, 1 e 2 não são opções válidas. Escolha uma nota: "
+		selecionarNumNota $numElementos
+		numNota=$?
+	done
+
+	local notaNome="${ARRNOTAS[$numNota]}"
+	local notaArquivo="$NT_DIR/$caderno/$notaNome.nta"
+	
+	local confirma
+	read -p "# Tem certeza que deseja apagar nota número # $numNota # ? (N/s): " confirma
+	case $confirma in
+		"S"|"s")
+			rm $notaArquivo
+			local -a arrLinhas
+			local linha
+			# readarray = armazena cada linha impressa pelo awk num índice da array arrLinhas (parâmetro -t = remove o \n do final de linha)
+			# awk = imprime apenas as linhas da base de dados contendo o nome da nota na primeira coluna
+			readarray -t arrLinhas < <(awk -v nome=$notaNome '$1 == nome' $DB_ARQ)
+			for linha in "${arrLinhas[@]}"; do
+				sed -i "/$linha/d" $DB_ARQ
+			done
+			local nome=$(echo -n "$linha" | cut -d ' ' -f6-)
+			echo "# Nota: $nome --> apagada!"
+			sleep 3
+			;;
+		*)
+			echo "# Ação cancelada!" && sleep 2
+			;;
+	esac
+}
