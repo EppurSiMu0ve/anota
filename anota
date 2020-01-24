@@ -3,11 +3,11 @@
 #
 # Script		: anota
 # Descrição		: um pequeno gerenciador de notas pessois em modo texto
-# Versão		: 0.9-beta
+# Versão		: 0.9.1-beta
 # Autor			: Eppur Si Muove
 # Contato		: eppur.si.muove.@keemail.me
 # Criação		: 29/12/2019
-# Modificação	: 23/01/2020
+# Modificação	: 24/01/2020
 # Licença		: GNU/GPL v3.0
 #
 # ------------------------------------------------------
@@ -27,9 +27,49 @@
 # >> ARRNOTAS		: lista (array) com o nome de cada nota dentro do caderno selecionado
 source $(dirname $0)/anotalib
 
-# -------------| Módulo Principal |----------------- #
+# -------------| Menu com Lista de Notas |----------------- #
+menuNotas(){
+	listaNotasPorCaderno $1
+	local numNota=$?
 
-moduloPrincipal(){
+	# ----------------->> numNota = 0 : Voltar
+	if [[ $numNota -eq 0 ]]; then
+		menuCadernos
+
+	# ----------------->> numNota = 1 : Nova Nota	
+	elif [[ $numNota -eq 1 ]]; then
+		novaNota $1
+		[[ $? -ne 0 ]] && echo "Algo saiu errado ao criar a nova nota. Saindo..." && sleep 3 && exit 1
+		menuNotas $1
+
+	# ----------------->> numNota = 2 : Remover uma Nota	
+	elif [[ $numNota -eq 2 ]]; then
+		if [[ ${#ARRNOTAS[@]} -eq 0 ]]; then
+			echo "# Sem notas para remover nesse caderno :) "
+			sleep 2
+			menuNotas $1
+		else			
+			removeNota $1
+			menuNotas $1
+		fi
+
+	# ----------------->> numNota maior que itens na array de notas : ERRO!
+	elif [[ $(($numNota-3)) -gt ${#ARRNOTAS[@]} ]]; then
+		echo "Índices da array de cadernos = ${#ARRNOTAS[@]}."
+		echo "Numero escolhido = $numNota"
+		echo "Nome, se houver = ${ARRNOTAS[$numNota]}"
+		echo "Erro interno!" && sleep 2 && exit 1
+	else
+
+	# ----------------->> numNota válido : abre nota com editor preferido
+		local nota_arq="$NT_DIR/${ARRCADERNOS[$1]}/${ARRNOTAS[$numNota]}.nta"
+		abreNota $nota_arq
+		menuNotas $1
+	fi
+}
+
+# -------------| Menu com Lista de Cadernos |----------------- #
+menuCadernos(){
 	escolheCaderno
 	local numCaderno=$?
 	# ----------------->> numCarderno = 0 : Sair
@@ -42,17 +82,17 @@ moduloPrincipal(){
 	elif [[ $numCaderno -eq 1 ]]; then
 		novoCaderno
 		[[ $? -ne 0 ]] && echo "Algo saiu errado ao criar o novo caderno. Saindo..." && sleep 3 && exit 1
-		moduloPrincipal
+		menuCadernos
 
 	# ------------------>> numCaderno = 2 : Remover um caderno
 	elif [[ $numCaderno -eq 2 ]]; then
 		if [[ ${#ARRCADERNOS[@]} -eq 0 ]]; then
 			echo "# Sem cadernos para remover aqui :) "
 			sleep 2
-			moduloPrincipal
+			menuCadernos
 		else
 			removeCaderno
-			moduloPrincipal
+			menuCadernos
 		fi
 
 	# ------------------>> numCaderno maior que itens na array de cadernos: ERRO!
@@ -61,49 +101,12 @@ moduloPrincipal(){
 		echo "Numero escolhido = $numCaderno"
 		echo "Nome, se houver = ${ARRCADERNOS[$numCaderno]}"
 		echo "Erro interno!" && sleep 2 && exit 1
+
+	# ------------------>> numCaderno válido: retorna número do caderno selecionado
 	else
-
-	# ------------------>> numCaderno válido: lista as notas contidas dentro do caderno selecionado
-		listaNotasPorCaderno $numCaderno
-		local numNota=$?
-
-		# ----------------->> numNota = 0 : Voltar
-		if [[ $numNota -eq 0 ]]; then
-			moduloPrincipal
-
-		# ----------------->> numNota = 1 : Nova Nota	
-		elif [[ $numNota -eq 1 ]]; then
-			novaNota $numCaderno
-			[[ $? -ne 0 ]] && echo "Algo saiu errado ao criar a nova nota. Saindo..." && sleep 3 && exit 1
-			moduloPrincipal
-
-		# ----------------->> numNota = 2 : Remover uma Nota	
-		elif [[ $numNota -eq 2 ]]; then
-			if [[ ${#ARRNOTAS[@]} -eq 0 ]]; then
-				echo "# Sem notas para remover nesse caderno :) "
-				sleep 2
-				moduloPrincipal
-			else			
-				removeNota $numCaderno
-				moduloPrincipal
-			fi
-
-		# ----------------->> numNota maior que itens na array de notas : ERRO!
-		elif [[ $(($numNota-3)) -gt ${#ARRNOTAS[@]} ]]; then
-			echo "Índices da array de cadernos = ${#ARRNOTAS[@]}."
-			echo "Numero escolhido = $numNota"
-			echo "Nome, se houver = ${ARRNOTAS[$numNota]}"
-			echo "Erro interno!" && sleep 2 && exit 1
-		else
-
-		# ----------------->> numNota válido : abre nota com editor preferido
-			local nota_arq="$NT_DIR/${ARRCADERNOS[$numCaderno]}/${ARRNOTAS[$numNota]}.nta"
-			abreNota $nota_arq
-			moduloPrincipal
-		fi
+		menuNotas $numCaderno
 	fi
 }
-
 
 # -------------| Início do Programa ANOTA! Divirta-se ! |----------------- #
 
@@ -117,7 +120,5 @@ if (estaVazio $NT_DIR); then
 	[[ $? -ne 0 ]] && echo "Algo saiu errado ao criar a primeira nota. Saindo..." && sleep 2 && exit 1
 fi
 
-# inicia moduloPrincipal
-moduloPrincipal
-
+menuCadernos
 
